@@ -1,3 +1,5 @@
 .env
 __pycache__/
 unsloth_compiled_cache
+gemma-amadeus
+trainer_output

@@ -47,10 +47,10 @@ model = FastModel.get_peft_model(
 )
 
 
-tokenizer = get_chat_template(
-    tokenizer,
-    chat_template = "gemma-3",
-)
+# tokenizer = get_chat_template(
+#     tokenizer,
+#     chat_template = "gemma-3",
+# )
 
 trainer = SFTTrainer(
     model = model,
@@ -58,14 +58,15 @@ trainer = SFTTrainer(
     train_dataset = dataset,
     eval_dataset = None, # Can set up evaluation!
     args = SFTConfig(
+        save_steps=300,
         dataset_text_field = "text",
         per_device_train_batch_size = 1,
-        gradient_accumulation_steps = 4, # Use GA to mimic batch size!
+        gradient_accumulation_steps = 2, # Use GA to mimic batch size!
         warmup_steps = 5,
-        # num_train_epochs = 1, # Set this for 1 full training run.
-        max_steps = 60,
+        num_train_epochs = 2, # Set this for 1 full training run.
+        #max_steps = 60,
         learning_rate = 2e-4, # Reduce to 2e-5 for long training runs
-        logging_steps = 1,
+        logging_steps = 5,
         optim = "adamw_8bit",
         weight_decay = 0.001,
         lr_scheduler_type = "linear",
