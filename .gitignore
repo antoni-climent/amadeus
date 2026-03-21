@@ -5,3 +5,7 @@ gemma-amadeus
 trainer_output
 models/
 .env
+dir_script.mpk
+data/VNScript/scx_files
+data/VNScript/txt_files
+wandb/
