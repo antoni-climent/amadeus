@@ -2,7 +2,7 @@ import os
 import torch
 from unsloth import FastVisionModel
 
-lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v2"
+lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v4/checkpoint-300"
 # "../models/qwen3.5-4b-dapt-kurisu_v12/checkpoint-80" is pretty good with new prompt
 max_seq_length = 8192
 load_in_4bit = True

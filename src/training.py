@@ -23,7 +23,7 @@ if __name__ == "__main__":
     vnscript_dir = repo_root / "data" / "VNScript"
 
     model_id = "Qwen/Qwen3.5-4B"
-    lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v3"
+    lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v4"
     train_data_file = vnscript_dir / "SG_corpus.txt"
 
     model, tokenizer = FastVisionModel.from_pretrained(
@@ -51,9 +51,9 @@ if __name__ == "__main__":
         "finetune_language_layers":   True, # False if not finetuning language layers
         "finetune_attention_modules": True, # False if not finetuning attention layers
         "finetune_mlp_modules":       True, # False if not finetuning MLP layers
-        "r": 32,
+        "r": 128,
         #"target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        "lora_alpha": 64,
+        "lora_alpha": 256,
         "lora_dropout": 0,
         "bias": "none",
         "use_gradient_checkpointing": "unsloth",
@@ -95,8 +95,8 @@ if __name__ == "__main__":
         gradient_accumulation_steps = gradient_accumulation_steps,
         eval_accumulation_steps = 1,
         warmup_ratio = 0.03,
-        num_train_epochs = 2,
-        learning_rate = 2e-5,
+        num_train_epochs = 4,
+        learning_rate = 1e-4,
         fp16 = not is_bfloat16_supported(),
         bf16 = is_bfloat16_supported(),
         logging_steps = 1,
@@ -111,9 +111,9 @@ if __name__ == "__main__":
         report_to = "wandb",
         logging_dir = log_dir,
         save_strategy = "steps",
-        save_steps = 50,
+        save_steps = 100,
         eval_strategy = "steps",
-        eval_steps = 50,
+        eval_steps = 100,
         load_best_model_at_end = True,
         metric_for_best_model = "eval_loss",
         # save_total_limit = 4,
