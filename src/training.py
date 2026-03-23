@@ -3,24 +3,28 @@ from trl import SFTConfig, SFTTrainer
 from transformers import EarlyStoppingCallback
 
 from datasets import Dataset
+from pathlib import Path
 import torch
-import csv
 import os
-import sys
 
 # ------------------------------------------------------------------------
-max_seq_length = 1024 # Choose any! We auto support RoPE Scaling internally!
+max_seq_length = 8192 # Choose any! We auto support RoPE Scaling internally!
+per_device_train_batch_size = 8
+per_device_eval_batch_size = 4
+gradient_accumulation_steps = 1
 dtype = None          # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
 load_in_4bit = True   # Use 4bit quantization to reduce memory usage. Can be False.
 # ------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    
-    model_id = "Qwen/Qwen3.5-4B"
-    lora_folder = "../models/qwen3.5-4b-dapt-kurisu_v15"
-    train_data_folder = "../data/VNScript/data.csv"
 
-    lora_folder_name = lora_folder.split("/")[-1]
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+    vnscript_dir = repo_root / "data" / "VNScript"
+
+    model_id = "Qwen/Qwen3.5-4B"
+    lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v2"
+    train_data_file = vnscript_dir / "SG_corpus.txt"
 
     model, tokenizer = FastVisionModel.from_pretrained(
         model_name = model_id,
@@ -60,27 +64,24 @@ if __name__ == "__main__":
     model = FastVisionModel.get_peft_model(model, **peft_args)
     FastVisionModel.for_training(model)
 
-    # Process  dataset
-    # Get system prompt from file
-    with open("system_prompt.txt", 'r') as file:
-        system_prompt = file.read()
-    formatted_samples = []
-    with open(train_data_folder, 'r') as file:
-        reader = csv.reader(file)
-        next(reader, None)
-        for row in reader:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": row[1]},
-                {"role": "assistant", "content": row[2]}
-            ]
-            formatted_samples.append(messages)
-    
-    full_dataset = Dataset.from_dict({"messages": formatted_samples})
-    dataset = full_dataset.train_test_split(test_size=0.1, seed=3407)
+    merged_corpus = train_data_file.read_text(encoding="utf-8")
+    lines = [line.strip() for line in merged_corpus.split("\n") if line.strip()]
+
+    full_dataset = Dataset.from_dict({"text": lines})
+
+    dataset = full_dataset.train_test_split(test_size=0.01, seed=3407)
 
     samples = len(dataset["train"])
+
     print(f"Samples: {samples}")
+    print(f"Loaded corpus from {train_data_file}")
+    print(
+        "Config: "
+        f"MAX_SEQ_LENGTH={max_seq_length}, "
+        f"PER_DEVICE_TRAIN_BATCH_SIZE={per_device_train_batch_size}, "
+        f"PER_DEVICE_EVAL_BATCH_SIZE={per_device_eval_batch_size}, "
+        f"GRADIENT_ACCUMULATION_STEPS={gradient_accumulation_steps}"
+    )
 
     # Training Arguments
     results_folder = os.path.join(lora_folder, "results")
@@ -89,12 +90,12 @@ if __name__ == "__main__":
 
     training_args = SFTConfig(
         output_dir = lora_folder,
-        per_device_train_batch_size = 8,
-        per_device_eval_batch_size = 2,
-        gradient_accumulation_steps = 1,
+        per_device_train_batch_size = per_device_train_batch_size,
+        per_device_eval_batch_size = per_device_eval_batch_size,
+        gradient_accumulation_steps = gradient_accumulation_steps,
         eval_accumulation_steps = 1,
         warmup_ratio = 0.03,
-        num_train_epochs = 3,
+        num_train_epochs = 2,
         learning_rate = 2e-6,
         fp16 = not is_bfloat16_supported(),
         bf16 = is_bfloat16_supported(),
@@ -103,16 +104,16 @@ if __name__ == "__main__":
         weight_decay = 0.01,
         lr_scheduler_type = "linear",
         seed = 3407,
-        packing = False, 
-        dataset_text_field = None,
+        packing = True,
+        dataset_text_field = "text",
         max_seq_length = max_seq_length,
-        assistant_only_loss = True,
+        assistant_only_loss = False,
         report_to = "wandb",
         logging_dir = log_dir,
         save_strategy = "steps",
-        save_steps = 20,
+        save_steps = 500,
         eval_strategy = "steps",
-        eval_steps = 20,
+        eval_steps = 500,
         load_best_model_at_end = True,
         metric_for_best_model = "eval_loss",
         # save_total_limit = 4,

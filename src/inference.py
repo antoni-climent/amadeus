@@ -2,15 +2,15 @@ import os
 import torch
 from unsloth import FastVisionModel
 
-lora_folder = "../models/qwen3.5-4b-dapt-kurisu_v14"
+lora_folder = "../models/qwen3.5-4b-kurisu-sg-corpus_v2"
 # "../models/qwen3.5-4b-dapt-kurisu_v12/checkpoint-80" is pretty good with new prompt
-max_seq_length = 2048
+max_seq_length = 8192
 load_in_4bit = True
 
 
 if __name__ == "__main__":
     model, tokenizer = FastVisionModel.from_pretrained(
-        model_name = "Qwen/Qwen3.5-4B",
+        model_name = lora_folder,
         max_seq_length = max_seq_length,
         dtype = None,           # Auto-detection
         load_in_4bit = load_in_4bit,
