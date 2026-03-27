@@ -1,6 +1,8 @@
 import os
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.inference import (
@@ -25,6 +27,13 @@ class LoadRequest(BaseModel):
 
 
 app = FastAPI(title="Amadeus Inference API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -59,6 +68,22 @@ def generate(request: GenerateRequest) -> dict[str, object]:
             max_new_tokens=request.max_new_tokens,
             system_prompt=request.system_prompt,
         )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Generation failed: {exc}") from exc
+
+
+@app.post("/generate/stream")
+def generate_stream(request: GenerateRequest) -> StreamingResponse:
+    try:
+        stream = service.stream_generate(
+            message=request.message,
+            history=request.history,
+            max_new_tokens=request.max_new_tokens,
+            system_prompt=request.system_prompt,
+        )
+        return StreamingResponse(stream, media_type="text/event-stream")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

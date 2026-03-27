@@ -10,3 +10,4 @@ data/VNScript/scx_files
 data/VNScript/txt_files
 wandb/
 dir_voice.mpk
+node_modules/

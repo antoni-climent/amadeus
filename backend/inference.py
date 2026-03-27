@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 import re
+from threading import Thread
 
 import torch
 
@@ -11,6 +13,7 @@ DEFAULT_MAX_SEQ_LENGTH = 8192
 DEFAULT_MAX_NEW_TOKENS = 4096
 DEFAULT_LOAD_IN_4BIT = True
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
+UNFINISHED_THINK_PATTERN = re.compile(r"<think>[\s\S]*$")
 
 
 class ModelService:
@@ -71,6 +74,47 @@ class ModelService:
             return ""
         return self.system_prompt_path.read_text(encoding="utf-8").strip()
 
+    def build_messages(
+        self,
+        message: str,
+        history: list[dict[str, str]] | None = None,
+        system_prompt: str | None = None,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]], dict[str, str]]:
+        prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
+        history_messages = list(history or [])
+        messages: list[dict[str, str]] = []
+        if prompt:
+            messages.append({"role": "system", "content": prompt})
+        messages.extend(history_messages)
+
+        user_message = {"role": "user", "content": message}
+        messages.append(user_message)
+        return messages, history_messages, user_message
+
+    def prepare_inputs(self, messages: list[dict[str, str]]):
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return self.tokenizer(text=[text], return_tensors="pt").to(device)
+
+    def clean_response(self, response: str) -> str:
+        cleaned = THINK_BLOCK_PATTERN.sub("", response)
+        cleaned = UNFINISHED_THINK_PATTERN.sub("", cleaned)
+        return cleaned.strip()
+
+    def build_history(
+        self,
+        history_messages: list[dict[str, str]],
+        user_message: dict[str, str],
+        response: str,
+    ) -> list[dict[str, str]]:
+        return history_messages + [user_message, {"role": "assistant", "content": response}]
+
     def generate(
         self,
         message: str,
@@ -81,22 +125,12 @@ class ModelService:
         if not self.is_loaded():
             self.load_model()
 
-        prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
-        messages: list[dict[str, str]] = []
-        if prompt:
-            messages.append({"role": "system", "content": prompt})
-        messages.extend(history or [])
-        messages.append({"role": "user", "content": message})
-
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
+        messages, history_messages, user_message = self.build_messages(
+            message=message,
+            history=history,
+            system_prompt=system_prompt,
         )
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        inputs = self.tokenizer(text=[text], return_tensors="pt").to(device)
+        inputs = self.prepare_inputs(messages)
 
         with torch.inference_mode():
             outputs = self.model.generate(
@@ -110,13 +144,72 @@ class ModelService:
         input_len = inputs.input_ids.shape[1]
         response_ids = outputs[0][input_len:]
         response = self.tokenizer.decode(response_ids, skip_special_tokens=True)
-        response = THINK_BLOCK_PATTERN.sub("", response).strip()
+        response = self.clean_response(response)
 
         return {
             "response": response,
-            "history": messages + [{"role": "assistant", "content": response}],
+            "history": self.build_history(history_messages, user_message, response),
             "model_loaded": True,
         }
+
+    def stream_generate(
+        self,
+        message: str,
+        history: list[dict[str, str]] | None = None,
+        max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
+        system_prompt: str | None = None,
+    ):
+        from transformers import TextIteratorStreamer
+
+        if not self.is_loaded():
+            self.load_model()
+
+        messages, history_messages, user_message = self.build_messages(
+            message=message,
+            history=history,
+            system_prompt=system_prompt,
+        )
+        inputs = self.prepare_inputs(messages)
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+
+        generation_kwargs = dict(
+            **inputs,
+            streamer=streamer,
+            max_new_tokens=max_new_tokens,
+            use_cache=True,
+            pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+            eos_token_id=self.tokenizer.eos_token_id,
+        )
+
+        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+        thread.start()
+
+        raw_response = ""
+        emitted_response = ""
+
+        for chunk in streamer:
+            raw_response += chunk
+            cleaned_response = self.clean_response(raw_response)
+            if len(cleaned_response) <= len(emitted_response):
+                continue
+
+            delta = cleaned_response[len(emitted_response):]
+            emitted_response = cleaned_response
+            yield self.format_sse_event("delta", {"delta": delta, "response": emitted_response})
+
+        thread.join()
+        final_response = self.clean_response(raw_response)
+        yield self.format_sse_event(
+            "done",
+            {
+                "response": final_response,
+                "history": self.build_history(history_messages, user_message, final_response),
+                "model_loaded": True,
+            },
+        )
+
+    def format_sse_event(self, event: str, payload: dict[str, object]) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
 service = ModelService()
@@ -134,7 +227,7 @@ def run_cli() -> None:
 
         result = service.generate(message=user_input, history=history)
         print(f"Assistant: {result['response']}")
-        history = [message for message in result["history"] if message.get("role") != "system"]
+        history = result["history"]
 
 
 if __name__ == "__main__":
