@@ -1,8 +1,14 @@
 import unittest
 import json
 from pathlib import Path
+from unittest.mock import patch
 
-from backend.inference import ModelService
+from backend.inference import (
+    ModelService,
+    configure_unsloth_runtime,
+    python_dev_headers_available,
+    suppress_known_runtime_warnings,
+)
 
 
 class DummyInputs(dict):
@@ -46,6 +52,36 @@ class DummyModel:
 
 
 class ModelServiceTests(unittest.TestCase):
+    def test_suppress_known_runtime_warnings_registers_bitsandbytes_filter(self):
+        with patch("backend.inference.warnings.filterwarnings") as mocked_filter:
+            suppress_known_runtime_warnings()
+            mocked_filter.assert_called_once_with(
+                "ignore",
+                message=r".*_check_is_size will be removed in a future PyTorch release.*",
+                category=FutureWarning,
+                module=r"bitsandbytes\._ops",
+            )
+
+    def test_python_dev_headers_available_checks_python_h(self):
+        with patch("backend.inference.sysconfig.get_config_var", return_value="/tmp/fake-python"):
+            with patch("backend.inference.Path.exists", return_value=True):
+                self.assertTrue(python_dev_headers_available())
+
+            with patch("backend.inference.Path.exists", return_value=False):
+                self.assertFalse(python_dev_headers_available())
+
+    def test_configure_unsloth_runtime_disables_compile_when_headers_missing(self):
+        with patch("backend.inference.python_dev_headers_available", return_value=False):
+            with patch.dict("backend.inference.os.environ", {}, clear=True):
+                configure_unsloth_runtime()
+                self.assertEqual("1", __import__("os").environ["UNSLOTH_COMPILE_DISABLE"])
+
+    def test_configure_unsloth_runtime_keeps_existing_env_when_headers_exist(self):
+        with patch("backend.inference.python_dev_headers_available", return_value=True):
+            with patch.dict("backend.inference.os.environ", {}, clear=True):
+                configure_unsloth_runtime()
+                self.assertNotIn("UNSLOTH_COMPILE_DISABLE", __import__("os").environ)
+
     def test_get_system_prompt_returns_empty_string_when_missing(self):
         service = ModelService(system_prompt_path=Path("/tmp/does-not-exist.txt"))
         self.assertEqual(service.get_system_prompt(), "")

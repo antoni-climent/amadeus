@@ -30,7 +30,8 @@ class TtsServiceTests(unittest.TestCase):
                 output_dir=output_dir,
                 tts_home=Path(temp_dir) / "tts_home",
                 mplconfigdir=Path(temp_dir) / "mplconfig",
-                speaker="Alison Dietlinde",
+                speaker="Ryan",
+                language="English",
             )
 
             with patch("backend.tts.subprocess.run") as mocked_run:
@@ -40,10 +41,11 @@ class TtsServiceTests(unittest.TestCase):
 
                 result = service.synthesize("Hello.")
 
-        self.assertEqual(result["speaker"], "Alison Dietlinde")
-        self.assertEqual(result["language"], "en")
+        self.assertEqual(result["speaker"], "Ryan")
+        self.assertEqual(result["language"], "English")
         self.assertTrue(result["path"].endswith(".wav"))
-        self.assertEqual(mocked_run.call_args.kwargs["env"]["COQUI_TOS_AGREED"], "1")
+        self.assertEqual(mocked_run.call_args.kwargs["env"]["HF_HOME"], str(Path(temp_dir) / "tts_home"))
+        self.assertEqual(mocked_run.call_args.kwargs["env"]["MPLCONFIGDIR"], str(Path(temp_dir) / "mplconfig"))
         self.assertIn("--speaker", mocked_run.call_args.args[0])
         self.assertIn("--device", mocked_run.call_args.args[0])
 

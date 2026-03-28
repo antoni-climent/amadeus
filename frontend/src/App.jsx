@@ -326,7 +326,7 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: String(text) }),
       });
 
       if (!response.ok) {

@@ -10,6 +10,59 @@ The files in ```src/``` are training and experimentation scripts. ```DAPT.py``` 
 ## App backend
 The app-facing inference service lives in ```backend/inference.py```, and the FastAPI server lives in ```backend/api.py```.
 
+## TTS setup
+The app uses 2 Python environments:
+- `.amadeus_env`: main backend + Qwen 3.5 inference
+- `.tts_env`: isolated Qwen3-TTS runtime
+
+This split is necessary because the LLM stack and Qwen3-TTS require different `transformers` compatibility ranges.
+
+The backend calls TTS through a subprocess, using `AMADEUS_TTS_PYTHON` to point at the interpreter inside `.tts_env`.
+
+Setup:
+
+```bash
+python3.11 -m venv .amadeus_env
+source .amadeus_env/bin/activate
+pip install -r requirements.txt
+
+python3.12 -m venv .tts_env
+source .tts_env/bin/activate
+pip install -r requirements-tts.txt
+
+cd frontend
+npm install
+cd ..
+```
+
+Run everything at once:
+
+```bash
+./run-dev.sh
+```
+
+This starts:
+- FastAPI backend from `.amadeus_env`
+- Vite frontend from `frontend/`
+
+If you want to run only the backend:
+
+```bash
+source .amadeus_env/bin/activate
+export AMADEUS_TTS_PYTHON="$PWD/.tts_env/bin/python"
+python backend/api.py
+```
+
+It also stores its runtime data inside the project:
+- `.runtime/tts_home`
+- `.runtime/mplconfig`
+- `.runtime/amadeus_tts`
+
+You can override these locations with:
+- `AMADEUS_TTS_HOME`
+- `AMADEUS_TTS_MPLCONFIGDIR`
+- `AMADEUS_TTS_OUTPUT_DIR`
+
 ## Data
 Inside ```/data``` there is the data used for the training + an attempt to create synthetic data, where a model was prompted to generate the questions from the answers in the dataset. Here LLMs have shown to be really bad at predicting what comes previously to a sentence, so it was discarded.
 

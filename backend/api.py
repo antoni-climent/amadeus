@@ -1,7 +1,8 @@
+import json
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
@@ -99,9 +100,33 @@ def generate_stream(request: GenerateRequest) -> StreamingResponse:
 
 
 @app.post("/tts")
-def tts(request: TtsRequest) -> FileResponse:
+async def tts(request: Request) -> FileResponse:
     try:
-        result = tts_service.synthesize(text=request.text, speaker=request.speaker)
+        raw_body = await request.body()
+        if not raw_body.strip():
+            raise ValueError("Text is required for speech synthesis.")
+
+        speaker = DEFAULT_TTS_SPEAKER
+        content_type = request.headers.get("content-type", "")
+
+        if "application/json" in content_type:
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                text = raw_body.decode("utf-8").strip()
+            else:
+                if isinstance(payload, dict):
+                    text = str(payload.get("text", "")).strip()
+                    speaker = str(payload.get("speaker", speaker)).strip() or speaker
+                else:
+                    text = str(payload).strip()
+        else:
+            text = raw_body.decode("utf-8").strip()
+
+        if not text:
+            raise ValueError("Text is required for speech synthesis.")
+
+        result = tts_service.synthesize(text=text, speaker=speaker)
         return FileResponse(
             path=result["path"],
             media_type="audio/wav",

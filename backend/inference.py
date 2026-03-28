@@ -1,7 +1,10 @@
 import json
+import os
 from pathlib import Path
 import re
+import sysconfig
 from threading import Thread
+import warnings
 
 import torch
 
@@ -14,6 +17,32 @@ DEFAULT_MAX_NEW_TOKENS = 4096
 DEFAULT_LOAD_IN_4BIT = True
 THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 UNFINISHED_THINK_PATTERN = re.compile(r"<think>[\s\S]*$")
+
+
+def suppress_known_runtime_warnings() -> None:
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*_check_is_size will be removed in a future PyTorch release.*",
+        category=FutureWarning,
+        module=r"bitsandbytes\._ops",
+    )
+
+
+def python_dev_headers_available() -> bool:
+    include_dir = sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_paths().get("include")
+    if not include_dir:
+        return False
+    return Path(include_dir, "Python.h").exists()
+
+
+def configure_unsloth_runtime() -> None:
+    suppress_known_runtime_warnings()
+    if python_dev_headers_available():
+        return
+
+    # Triton builds a small C extension against the active interpreter.
+    # When Python dev headers are missing, force Unsloth onto the non-compiled path.
+    os.environ.setdefault("UNSLOTH_COMPILE_DISABLE", "1")
 
 
 class ModelService:
@@ -40,7 +69,15 @@ class ModelService:
         max_seq_length: int | None = None,
         load_in_4bit: bool | None = None,
     ) -> dict[str, object]:
-        from unsloth import FastVisionModel
+        configure_unsloth_runtime()
+        try:
+            from unsloth import FastVisionModel
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to import Unsloth in the current environment. "
+                "Check that .amadeus_env has compatible versions of unsloth, transformers, torch, and GPU support. "
+                f"Original error: {exc}"
+            ) from exc
 
         resolved_model_path = Path(model_path).expanduser() if model_path else self.model_path
         resolved_max_seq_length = max_seq_length or self.max_seq_length

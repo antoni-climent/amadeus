@@ -1,6 +1,9 @@
 .venv
+.venvs/
+.conda/
 __pycache__/
 unsloth_compiled_cache
+.runtime/
 gemma-amadeus
 trainer_output
 models/
@@ -11,3 +14,5 @@ data/VNScript/txt_files
 wandb/
 dir_voice.mpk
 node_modules/
+.amadeus_env/
+.tts_env/
