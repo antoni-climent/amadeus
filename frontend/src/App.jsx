@@ -133,10 +133,12 @@ export default function App() {
   const [isSending, setIsSending] = useState(false);
   const [isWaitingForStream, setIsWaitingForStream] = useState(false);
   const [mouthFrame, setMouthFrame] = useState(0);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [error, setError] = useState("");
   const messagesEndRef = useRef(null);
-  const mouthTimeoutsRef = useRef([]);
-  const previousStreamTextRef = useRef("");
+  const audioRef = useRef(null);
+  const audioObjectUrlRef = useRef("");
+  const hasAttemptedAutoLoadRef = useRef(false);
   const displayedMessages = toDisplayMessages(history, streamingResponse);
   const latestAssistantText =
     streamingResponse ||
@@ -145,7 +147,7 @@ export default function App() {
   const expression = detectExpression(latestAssistantText, isWaitingForStream);
   const portraitFrames = PORTRAIT_FRAMES[expression] ?? PORTRAIT_FRAMES.neutral;
   const portraitSource = portraitFrames[mouthFrame] ?? portraitFrames[0];
-  const isSpeaking = isSending && !isWaitingForStream;
+  const portraitStatus = isWaitingForStream ? "Preparing" : isPlayingAudio ? "Voice" : "Idle";
 
   useEffect(() => {
     checkHealth();
@@ -156,43 +158,27 @@ export default function App() {
   }, [history, streamingResponse, isSending]);
 
   useEffect(() => {
-    if (!isSpeaking) {
-      previousStreamTextRef.current = "";
-      clearMouthAnimation(mouthTimeoutsRef);
+    if (!isPlayingAudio) {
       setMouthFrame(0);
       return undefined;
     }
 
-    const previousText = previousStreamTextRef.current;
-    const deltaText = streamingResponse.startsWith(previousText)
-      ? streamingResponse.slice(previousText.length)
-      : streamingResponse;
+    const intervalId = window.setInterval(() => {
+      setMouthFrame((currentFrame) => (currentFrame + 1) % 3);
+    }, 130);
 
-    previousStreamTextRef.current = streamingResponse;
-
-    if (!deltaText.trim()) {
-      return undefined;
-    }
-
-    clearMouthAnimation(mouthTimeoutsRef);
-
-    const lastMeaningfulChar = deltaText.trim().slice(-1);
-    const isPause = /[.,!?;:]/.test(lastMeaningfulChar);
-    const sequence = chooseMouthSequence(deltaText, isPause);
-    const frameDuration = isPause ? 90 : 70;
-
-    sequence.forEach((frame, index) => {
-      const timeoutId = window.setTimeout(() => {
-        setMouthFrame(frame);
-      }, frameDuration * index);
-      mouthTimeoutsRef.current.push(timeoutId);
-    });
-
-    return () => undefined;
-  }, [isSpeaking, streamingResponse]);
+    return () => window.clearInterval(intervalId);
+  }, [isPlayingAudio]);
 
   useEffect(() => {
-    return () => clearMouthAnimation(mouthTimeoutsRef);
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current);
+      }
+    };
   }, []);
 
   async function checkHealth() {
@@ -202,7 +188,16 @@ export default function App() {
         throw new Error("Backend is unavailable.");
       }
       const data = await response.json();
-      setStatus(data.model_loaded ? "Backend ready." : "Backend up. Model not loaded.");
+      if (data.model_loaded) {
+        setStatus("Backend ready.");
+        return;
+      }
+
+      setStatus("Backend up. Loading model...");
+      if (!hasAttemptedAutoLoadRef.current) {
+        hasAttemptedAutoLoadRef.current = true;
+        void loadModel();
+      }
     } catch {
       setStatus("Backend unreachable.");
     }
@@ -300,6 +295,7 @@ export default function App() {
             setIsWaitingForStream(false);
             setHistory(parsedEvent.data.history ?? []);
             setStatus("Backend ready.");
+            await playSpeech(parsedEvent.data.response ?? "");
           }
         }
       }
@@ -317,6 +313,59 @@ export default function App() {
   function handleComposerKeyDown(event) {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       sendMessage(event);
+    }
+  }
+
+  async function playSpeech(text) {
+    if (!text.trim()) {
+      return;
+    }
+
+    try {
+      setStatus("Synthesizing voice...");
+      const response = await fetch(`${API_BASE_URL}/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail ?? "Failed to synthesize speech.");
+      }
+
+      const audioBlob = await response.blob();
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current);
+      }
+
+      const objectUrl = URL.createObjectURL(audioBlob);
+      audioObjectUrlRef.current = objectUrl;
+      const audio = new Audio(objectUrl);
+      audioRef.current = audio;
+
+      audio.onplay = () => {
+        setIsPlayingAudio(true);
+        setStatus("Playing voice...");
+      };
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        setMouthFrame(0);
+        setStatus("Backend ready.");
+      };
+      audio.onerror = () => {
+        setIsPlayingAudio(false);
+        setMouthFrame(0);
+        setError("Audio playback failed.");
+        setStatus("Backend ready.");
+      };
+
+      await audio.play();
+    } catch (speechError) {
+      setIsPlayingAudio(false);
+      setMouthFrame(0);
+      setError(speechError.message);
+      setStatus("Backend ready.");
     }
   }
 
@@ -342,9 +391,7 @@ export default function App() {
             </div>
             <div className="chat-meta">
               <span className="expression-chip">{EXPRESSION_LABELS[expression]}</span>
-              <span className="portrait-status">
-                {isWaitingForStream ? "Preparing" : isSpeaking ? "Speaking" : "Idle"}
-              </span>
+              <span className="portrait-status">{portraitStatus}</span>
             </div>
             <button className="secondary-button" onClick={loadModel} disabled={isLoadingModel || isSending}>
               {isLoadingModel ? "Loading..." : "Load model"}
@@ -421,28 +468,4 @@ function parseSseEvent(eventBlock) {
   }
 
   return { event: eventName, data: JSON.parse(data) };
-}
-
-function chooseMouthSequence(deltaText, isPause) {
-  if (isPause) {
-    return [1, 0];
-  }
-
-  const compactText = deltaText.replace(/\s+/g, "");
-  if (compactText.length <= 2) {
-    return [1, 0];
-  }
-
-  if (compactText.length <= 6) {
-    return [1, 2, 0];
-  }
-
-  return [1, 2, 1, 2, 0];
-}
-
-function clearMouthAnimation(mouthTimeoutsRef) {
-  for (const timeoutId of mouthTimeoutsRef.current) {
-    window.clearTimeout(timeoutId);
-  }
-  mouthTimeoutsRef.current = [];
 }

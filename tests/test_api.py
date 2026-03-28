@@ -1,5 +1,7 @@
 import importlib.util
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 FASTAPI_AVAILABLE = importlib.util.find_spec("fastapi") is not None
@@ -90,6 +92,23 @@ class InferenceApiTests(unittest.TestCase):
             max_new_tokens=128,
             system_prompt=None,
         )
+
+    def test_tts_endpoint_returns_wav_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+
+            with patch.object(
+                api.tts_service,
+                "synthesize",
+                return_value={"path": str(wav_path), "speaker": "Alison Dietlinde", "language": "en"},
+            ) as mocked_tts:
+                response = self.client.post("/tts", json={"text": "Hello.", "speaker": "Alison Dietlinde"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "audio/wav")
+        self.assertEqual(response.headers["x-amadeus-speaker"], "Alison Dietlinde")
+        mocked_tts.assert_called_once_with(text="Hello.", speaker="Alison Dietlinde")
 
 
 if __name__ == "__main__":
