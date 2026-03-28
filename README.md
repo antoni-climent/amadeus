@@ -17,7 +17,8 @@ The app uses 2 Python environments:
 
 This split is necessary because the LLM stack and Qwen3-TTS require different `transformers` compatibility ranges.
 
-The backend calls TTS through a subprocess, using `AMADEUS_TTS_PYTHON` to point at the interpreter inside `.tts_env`.
+The backend calls TTS through a persistent local worker running from `.tts_env`.
+That worker keeps Qwen3-TTS loaded between requests, so synthesis is much faster after the first load.
 
 Setup:
 
@@ -43,13 +44,17 @@ Run everything at once:
 
 This starts:
 - FastAPI backend from `.amadeus_env`
+- persistent Qwen3-TTS worker from `.tts_env`
 - Vite frontend from `frontend/`
 
-If you want to run only the backend:
+If you want to run only the backend + TTS worker:
 
 ```bash
+source .tts_env/bin/activate
+python -m backend.tts_worker
+
 source .amadeus_env/bin/activate
-export AMADEUS_TTS_PYTHON="$PWD/.tts_env/bin/python"
+export AMADEUS_TTS_URL="http://127.0.0.1:8001"
 python backend/api.py
 ```
 

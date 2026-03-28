@@ -55,11 +55,18 @@ class ModelServiceTests(unittest.TestCase):
     def test_suppress_known_runtime_warnings_registers_bitsandbytes_filter(self):
         with patch("backend.inference.warnings.filterwarnings") as mocked_filter:
             suppress_known_runtime_warnings()
-            mocked_filter.assert_called_once_with(
+            self.assertEqual(mocked_filter.call_count, 2)
+            mocked_filter.assert_any_call(
                 "ignore",
                 message=r".*_check_is_size will be removed in a future PyTorch release.*",
                 category=FutureWarning,
                 module=r"bitsandbytes\._ops",
+            )
+            mocked_filter.assert_any_call(
+                "ignore",
+                message=r".*_check_is_size will be removed in a future PyTorch release.*",
+                category=FutureWarning,
+                module=r"bitsandbytes\.backends\.cuda\.ops",
             )
 
     def test_python_dev_headers_available_checks_python_h(self):

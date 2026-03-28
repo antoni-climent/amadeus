@@ -20,12 +20,13 @@ UNFINISHED_THINK_PATTERN = re.compile(r"<think>[\s\S]*$")
 
 
 def suppress_known_runtime_warnings() -> None:
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*_check_is_size will be removed in a future PyTorch release.*",
-        category=FutureWarning,
-        module=r"bitsandbytes\._ops",
-    )
+    for module in (r"bitsandbytes\._ops", r"bitsandbytes\.backends\.cuda\.ops"):
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*_check_is_size will be removed in a future PyTorch release.*",
+            category=FutureWarning,
+            module=module,
+        )
 
 
 def python_dev_headers_available() -> bool:

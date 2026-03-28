@@ -27,6 +27,29 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 export AMADEUS_TTS_PYTHON="$TTS_ENV/bin/python"
+export AMADEUS_TTS_URL="${AMADEUS_TTS_URL:-http://127.0.0.1:8001}"
+
+(
+  cd "$ROOT_DIR"
+  source "$TTS_ENV/bin/activate"
+  exec python -m backend.tts_worker
+) &
+
+source "$TTS_ENV/bin/activate"
+for _ in $(seq 1 180); do
+  if python - <<'PY'
+from urllib.request import urlopen
+try:
+    with urlopen("http://127.0.0.1:8001/health", timeout=1) as response:
+        raise SystemExit(0 if response.status == 200 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    break
+  fi
+  sleep 1
+done
 
 (
   cd "$ROOT_DIR"
